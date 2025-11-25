@@ -3,11 +3,12 @@ import { AlertCircle, Zap, CheckCircle, TrendingUp, ArrowRight, FileText, Users,
 interface HomePageProps {
   onGetStarted: () => void;
   onLogin: () => void;
+  onDemoLogin: (email: string) => void;
 }
 
-export function HomePage({ onGetStarted, onLogin }: HomePageProps) {
+export function HomePage({ onGetStarted, onLogin, onDemoLogin }: HomePageProps) {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 overflow-y-auto">
       {/* Navigation */}
       <nav className="border-b border-white/10 bg-black/20 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
@@ -46,17 +47,46 @@ export function HomePage({ onGetStarted, onLogin }: HomePageProps) {
             Purpose-built for civil engineering teams who demand precision.
           </p>
 
-          <div className="flex gap-4 justify-center">
-            <button
-              onClick={onGetStarted}
-              className="px-8 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all hover:scale-105 shadow-xl shadow-blue-500/30 flex items-center gap-2 text-lg"
-            >
-              Get Started Free
-              <ArrowRight className="w-5 h-5" />
-            </button>
-            <button className="px-8 py-4 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors border border-white/20 text-lg">
-              Watch Demo
-            </button>
+          <div className="flex flex-col items-center gap-4">
+            <div className="flex gap-4 justify-center">
+              <button
+                onClick={onGetStarted}
+                className="px-8 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all hover:scale-105 shadow-xl shadow-blue-500/30 flex items-center gap-2 text-lg"
+              >
+                Get Started Free
+                <ArrowRight className="w-5 h-5" />
+              </button>
+              <button 
+                onClick={onLogin}
+                className="px-8 py-4 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors border border-white/20 text-lg"
+              >
+                Sign In
+              </button>
+            </div>
+            
+            {/* Demo Accounts */}
+            <div className="mt-6 pt-6 border-t border-white/10 w-full max-w-md">
+              <p className="text-sm text-slate-400 mb-3 text-center">Try Demo Accounts:</p>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => onDemoLogin('demo-junior@engineering.com')}
+                  className="px-4 py-2.5 bg-green-500/20 border border-green-500/30 text-green-300 rounded-lg hover:bg-green-500/30 transition-colors text-sm flex items-center justify-center gap-2"
+                >
+                  <Users className="w-4 h-4" />
+                  Junior Engineer
+                </button>
+                <button
+                  onClick={() => onDemoLogin('demo-senior@engineering.com')}
+                  className="px-4 py-2.5 bg-purple-500/20 border border-purple-500/30 text-purple-300 rounded-lg hover:bg-purple-500/30 transition-colors text-sm flex items-center justify-center gap-2"
+                >
+                  <Users className="w-4 h-4" />
+                  Senior Engineer
+                </button>
+              </div>
+              <p className="text-xs text-slate-500 mt-2 text-center">
+                No signup required - instant access to demo projects
+              </p>
+            </div>
           </div>
         </div>
 

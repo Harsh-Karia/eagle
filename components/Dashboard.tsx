@@ -38,23 +38,28 @@ export function Dashboard({ user, projects, onSelectProject, onCreateProject, on
     }
   };
 
-  const handleCreateProject = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleCreateProject = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
-    const newProject: Omit<Project, 'id' | 'createdAt'> = {
+    const newProject: Omit<Project, 'id' | 'createdAt' | 'drawings' | 'issueCount' | 'resolvedCount'> = {
       name: formData.get('name') as string,
       description: formData.get('description') as string,
       status: 'active',
-      drawings: [],
-      issueCount: 0,
-      resolvedCount: 0,
+      notes: '',
+      teamMembers: [],
     };
-    onCreateProject(newProject);
-    setIsCreating(false);
+    
+    try {
+      await onCreateProject(newProject);
+      setIsCreating(false);
+    } catch (error) {
+      // Error already shown in App.tsx
+      // Keep modal open so user can try again
+    }
   };
 
   return (
-    <div className="h-screen flex flex-col bg-slate-50">
+    <div className="min-h-screen flex flex-col bg-slate-50">
       {/* Header */}
       <header className="bg-white border-b border-slate-200 px-6 py-4">
         <div className="flex items-center justify-between">

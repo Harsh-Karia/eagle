@@ -4,7 +4,9 @@ import { PDFViewer } from './PDFViewer';
 import { IssueSidebar } from './IssueSidebar';
 import { CommentModal } from './CommentModal';
 import type { User, Project, Drawing, Issue } from '../App';
-import { getDemoIssues } from '../demoData';
+import { getIssues, createIssue, updateIssue, deleteIssue, uploadDrawing, deleteDrawing as deleteDrawingAPI } from '../lib/api';
+import { analyzeDrawing } from '../lib/aiService';
+import { supabase } from '../lib/supabase';
 
 interface ProjectViewProps {
   project: Project;
@@ -28,123 +30,126 @@ export function ProjectView({ project, user, onBack, onUpdateProject }: ProjectV
   const [isEditingNotes, setIsEditingNotes] = useState(false);
   const [notesText, setNotesText] = useState(project.notes || '');
 
-  // Initialize demo issues when project loads
+  // Check if user is a demo user (hardcoded auth)
+  const isDemoUser = user?.id === 'demo-junior' || user?.id === 'demo-senior';
+  // Use mock mode if Supabase not configured OR if user is a demo user
+  const useMockMode = !supabase || isDemoUser;
+
+  // Track the last project ID we loaded issues for
+  const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
+
+  // Load issues when project loads (only once per project)
   useEffect(() => {
-    const demoIssues: Issue[] = [];
-    project.drawings.forEach(drawing => {
-      const drawingIssues = getDemoIssues(project.id, drawing.id);
-      demoIssues.push(...drawingIssues);
-    });
-    setIssues(demoIssues);
-  }, [project.id]);
+    // Skip if we've already loaded issues for this project
+    if (loadedProjectId === project.id) {
+      return;
+    }
+
+    const loadIssues = async () => {
+      // Check if this is a demo project or demo user
+      if (project.id.startsWith('demo-') || useMockMode) {
+        const { getDemoIssues } = await import('../demoData');
+        const demoIssues: Issue[] = [];
+        project.drawings.forEach(drawing => {
+          // Map demo project IDs: demo-1 -> 1, demo-2 -> 2, demo-3 -> 3
+          // For new projects created by demo users, use project.id as-is
+          const projectIdForIssues = project.id.startsWith('demo-') 
+            ? project.id.replace('demo-', '')
+            : project.id;
+          const drawingIssues = getDemoIssues(projectIdForIssues, drawing.id);
+          demoIssues.push(...drawingIssues);
+        });
+        setIssues(demoIssues);
+        setLoadedProjectId(project.id);
+        return;
+      }
+
+      try {
+        const projectIssues = await getIssues(project.id);
+        setIssues(projectIssues);
+        setLoadedProjectId(project.id);
+      } catch (error) {
+        console.error('Failed to load issues:', error);
+        setIssues([]);
+        setLoadedProjectId(project.id);
+      }
+    };
+
+    loadIssues();
+  }, [project.id, useMockMode, loadedProjectId]);
 
   const handleFileUpload = useCallback(async (file: File) => {
     setIsUploading(true);
-    const url = URL.createObjectURL(file);
     
-    const newDrawing: Drawing = {
-      id: Date.now().toString(),
-      name: file.name,
-      file: file,
-      url: url,
-      numPages: 1,
-      uploadedAt: new Date(),
-      uploadedBy: user?.name || 'Unknown',
-    };
-
-    // Update project
-    const updatedProject = {
-      ...project,
-      drawings: [...project.drawings, newDrawing],
-    };
-    onUpdateProject(updatedProject);
-    setSelectedDrawing(newDrawing);
-    setIsUploading(false);
-
-    // Start AI analysis
-    setIsAnalyzing(true);
-    setTimeout(() => {
-      analyzeDrawingWithAI(newDrawing.id);
-    }, 1500);
-  }, [project, user, onUpdateProject]);
-
-  const analyzeDrawingWithAI = async (drawingId: string) => {
     try {
-      // Mock AI-generated issues with relative coordinates (0-1 range)
-      const mockAIIssues: Issue[] = [
-        {
-          id: `ai-${Date.now()}-1`,
-          drawingId: drawingId,
-          pageNumber: 1,
-          x: 0.25, // 25% from left
-          y: 0.30, // 30% from top
-          type: 'Missing Dimension/Callout',
-          severity: 'High',
-          description: 'Critical dimension missing for storm drain connection at Station 12+45. Required per Section 3.2.1 of specifications.',
-          status: 'Open',
-          createdBy: 'AI Assistant',
-          aiGenerated: true,
-          timestamp: new Date(),
-        },
-        {
-          id: `ai-${Date.now()}-2`,
-          drawingId: drawingId,
-          pageNumber: 1,
-          x: 0.55,
-          y: 0.45,
-          type: 'Code Compliance Concern',
-          severity: 'Medium',
-          description: 'Potential ADA compliance issue: Sidewalk slope appears to exceed 2% maximum cross-slope requirement.',
-          status: 'Open',
-          createdBy: 'AI Assistant',
-          aiGenerated: true,
-          timestamp: new Date(),
-        },
-        {
-          id: `ai-${Date.now()}-3`,
-          drawingId: drawingId,
-          pageNumber: 1,
-          x: 0.75,
-          y: 0.25,
-          type: 'Grading/Elevation Issue',
-          severity: 'High',
-          description: 'Inconsistent elevation data: Spot elevation 245.3\' conflicts with contour interpolation showing ~246.1\'.',
-          status: 'Open',
-          createdBy: 'AI Assistant',
-          aiGenerated: true,
-          timestamp: new Date(),
-        },
-        {
-          id: `ai-${Date.now()}-4`,
-          drawingId: drawingId,
-          pageNumber: 1,
-          x: 0.40,
-          y: 0.70,
-          type: 'Specification Inconsistency',
-          severity: 'Low',
-          description: 'Detail reference calls out Detail 5/C3.1, but detail sheet shows as 5/C3.2. Verify correct reference.',
-          status: 'Open',
-          createdBy: 'AI Assistant',
-          aiGenerated: true,
-          timestamp: new Date(),
-        },
-      ];
+      let newDrawing: Drawing;
 
-      setIssues(prev => [...prev, ...mockAIIssues]);
-      
-      // Update project issue counts
+      if (!useMockMode) {
+        // Upload to Supabase Storage
+        newDrawing = await uploadDrawing(project.id, file);
+      } else {
+        // Fallback to local URL for demo users or when Supabase not configured
+        const url = URL.createObjectURL(file);
+        newDrawing = {
+          id: Date.now().toString(),
+          name: file.name,
+          file: file,
+          url: url,
+          numPages: 1,
+          uploadedAt: new Date(),
+          uploadedBy: user?.name || 'Unknown',
+        };
+      }
+
+      // Update project with new drawing
       const updatedProject = {
         ...project,
-        issueCount: project.issueCount + mockAIIssues.length,
+        drawings: [...project.drawings, newDrawing],
       };
       onUpdateProject(updatedProject);
-      
-      setIsAnalyzing(false);
-    } catch (error) {
-      console.error('AI analysis failed:', error);
-      setIsAnalyzing(false);
+      setSelectedDrawing(newDrawing);
+      setIsUploading(false);
+
+      // Start AI analysis
+      setIsAnalyzing(true);
+      try {
+        const aiIssues = await analyzeDrawing(newDrawing, project.id);
+        
+        // Save AI issues to database (skip for demo users)
+        if (!useMockMode) {
+          for (const issue of aiIssues) {
+            try {
+              await createIssue({
+                ...issue,
+                projectId: project.id,
+              });
+            } catch (error) {
+              console.error('Failed to save issue:', error);
+            }
+          }
+        }
+        
+        // Update local state
+        setIssues(prev => [...prev, ...aiIssues]);
+        
+        // Update project issue counts
+        const updatedProjectWithCounts = {
+          ...updatedProject,
+          issueCount: updatedProject.issueCount + aiIssues.length,
+        };
+        onUpdateProject(updatedProjectWithCounts);
+      } catch (error) {
+        console.error('AI analysis failed:', error);
+      } finally {
+        setIsAnalyzing(false);
+      }
+    } catch (error: any) {
+      console.error('Upload failed:', error);
+      alert(error.message || 'Failed to upload drawing. Please try again.');
+      setIsUploading(false);
     }
-  };
+  }, [project, user, onUpdateProject, useMockMode]);
+
 
   const handlePDFClick = useCallback((x: number, y: number, pageNumber: number) => {
     if (!selectedDrawing) return;
@@ -152,31 +157,63 @@ export function ProjectView({ project, user, onBack, onUpdateProject }: ProjectV
     setIsCommentModalOpen(true);
   }, [selectedDrawing]);
 
-  const handleSaveComment = useCallback((issueData: Omit<Issue, 'id' | 'timestamp'>) => {
+  const handleSaveComment = useCallback(async (issueData: Omit<Issue, 'id' | 'timestamp'>) => {
     if (!selectedDrawing) return;
 
-    if (pendingPin) {
-      const newIssue: Issue = {
-        ...issueData,
-        id: `manual-${Date.now()}`,
-        drawingId: selectedDrawing.id,
-        timestamp: new Date(),
-      };
-      setIssues(prev => [...prev, newIssue]);
-      
-      // Update project issue count
-      const updatedProject = {
-        ...project,
-        issueCount: project.issueCount + 1,
-      };
-      onUpdateProject(updatedProject);
-    } else if (selectedIssue) {
-      setIssues(prev => prev.map(issue => 
-        issue.id === selectedIssue.id ? { ...issue, ...issueData } : issue
-      ));
+    try {
+      if (pendingPin) {
+        // Create new issue
+        const newIssueData = {
+          ...issueData,
+          drawingId: selectedDrawing.id,
+          projectId: project.id,
+        };
+
+        if (!useMockMode) {
+          const newIssue = await createIssue(newIssueData);
+          setIssues(prev => [...prev, newIssue]);
+        } else {
+          // Fallback to local state for demo users
+          const newIssue: Issue = {
+            ...issueData,
+            id: `manual-${Date.now()}`,
+            drawingId: selectedDrawing.id,
+            timestamp: new Date(),
+          };
+          setIssues(prev => [...prev, newIssue]);
+        }
+        
+        // Update project issue count
+        const updatedProject = {
+          ...project,
+          issueCount: project.issueCount + 1,
+        };
+        onUpdateProject(updatedProject);
+      } else if (selectedIssue) {
+        // Update existing issue
+        const updatedIssue = {
+          ...selectedIssue,
+          ...issueData,
+        };
+
+        if (!useMockMode) {
+          const savedIssue = await updateIssue(updatedIssue);
+          setIssues(prev => prev.map(issue => 
+            issue.id === selectedIssue.id ? savedIssue : issue
+          ));
+        } else {
+          // Fallback to local state for demo users
+          setIssues(prev => prev.map(issue => 
+            issue.id === selectedIssue.id ? updatedIssue : issue
+          ));
+        }
+      }
+      handleCloseModal();
+    } catch (error) {
+      console.error('Failed to save issue:', error);
+      alert('Failed to save issue. Please try again.');
     }
-    handleCloseModal();
-  }, [pendingPin, selectedIssue, selectedDrawing, project, onUpdateProject]);
+  }, [pendingPin, selectedIssue, selectedDrawing, project, onUpdateProject, useMockMode]);
 
   const handleCloseModal = useCallback(() => {
     setIsCommentModalOpen(false);
@@ -189,66 +226,100 @@ export function ProjectView({ project, user, onBack, onUpdateProject }: ProjectV
     setIsCommentModalOpen(true);
   }, []);
 
-  const handleDeleteIssue = useCallback((issueId: string) => {
-    setIssues(prev => prev.filter(issue => issue.id !== issueId));
-    
-    // Update project issue count
-    const updatedProject = {
-      ...project,
-      issueCount: Math.max(0, project.issueCount - 1),
-    };
-    onUpdateProject(updatedProject);
-  }, [project, onUpdateProject]);
+  const handleDeleteIssue = useCallback(async (issueId: string) => {
+    try {
+      if (!useMockMode) {
+        await deleteIssue(issueId);
+      }
+      
+      setIssues(prev => prev.filter(issue => issue.id !== issueId));
+      
+      // Update project issue count
+      const updatedProject = {
+        ...project,
+        issueCount: Math.max(0, project.issueCount - 1),
+      };
+      onUpdateProject(updatedProject);
+    } catch (error) {
+      console.error('Failed to delete issue:', error);
+      alert('Failed to delete issue. Please try again.');
+    }
+  }, [project, onUpdateProject, useMockMode]);
 
   const handleIssueClick = useCallback((issue: Issue) => {
     setHighlightedIssueId(issue.id);
     setTimeout(() => setHighlightedIssueId(null), 2000);
   }, []);
 
-  const handleUpdateIssueStatus = useCallback((issueId: string, status: Issue['status']) => {
+  const handleUpdateIssueStatus = useCallback(async (issueId: string, status: Issue['status']) => {
     const issue = issues.find(i => i.id === issueId);
-    const wasResolved = issue?.status === 'Resolved';
+    if (!issue) return;
+
+    const wasResolved = issue.status === 'Resolved';
     const isNowResolved = status === 'Resolved';
     
-    setIssues(prev => prev.map(issue => 
-      issue.id === issueId ? { ...issue, status } : issue
-    ));
+    try {
+      const updatedIssue = {
+        ...issue,
+        status,
+      };
 
-    // Update project resolved count
-    if (!wasResolved && isNowResolved) {
-      const updatedProject = {
-        ...project,
-        resolvedCount: project.resolvedCount + 1,
-      };
-      onUpdateProject(updatedProject);
-    } else if (wasResolved && !isNowResolved) {
-      const updatedProject = {
-        ...project,
-        resolvedCount: Math.max(0, project.resolvedCount - 1),
-      };
-      onUpdateProject(updatedProject);
+      if (!useMockMode) {
+        await updateIssue(updatedIssue);
+      }
+
+      setIssues(prev => prev.map(i => 
+        i.id === issueId ? updatedIssue : i
+      ));
+
+      // Update project resolved count
+      if (!wasResolved && isNowResolved) {
+        const updatedProject = {
+          ...project,
+          resolvedCount: project.resolvedCount + 1,
+        };
+        onUpdateProject(updatedProject);
+      } else if (wasResolved && !isNowResolved) {
+        const updatedProject = {
+          ...project,
+          resolvedCount: Math.max(0, project.resolvedCount - 1),
+        };
+        onUpdateProject(updatedProject);
+      }
+    } catch (error) {
+      console.error('Failed to update issue status:', error);
+      alert('Failed to update issue status. Please try again.');
     }
-  }, [issues, project, onUpdateProject]);
+  }, [issues, project, onUpdateProject, useMockMode]);
 
-  const handleDeleteDrawing = useCallback((drawingId: string) => {
+  const handleDeleteDrawing = useCallback(async (drawingId: string) => {
     if (!confirm('Delete this drawing? All associated issues will be removed.')) return;
     
-    // Remove drawing and its issues
-    const drawingIssues = issues.filter(i => i.drawingId === drawingId);
-    const resolvedIssues = drawingIssues.filter(i => i.status === 'Resolved').length;
-    
-    const updatedProject = {
-      ...project,
-      drawings: project.drawings.filter(d => d.id !== drawingId),
-      issueCount: project.issueCount - drawingIssues.length,
-      resolvedCount: project.resolvedCount - resolvedIssues,
-    };
-    onUpdateProject(updatedProject);
-    
-    setIssues(prev => prev.filter(i => i.drawingId !== drawingId));
-    
-    if (selectedDrawing?.id === drawingId) {
-      setSelectedDrawing(updatedProject.drawings.length > 0 ? updatedProject.drawings[0] : null);
+    try {
+      if (!useMockMode) {
+        await deleteDrawingAPI(drawingId);
+      }
+      
+      // Remove drawing and its issues
+      const drawingIssues = issues.filter(i => i.drawingId === drawingId);
+      const resolvedIssues = drawingIssues.filter(i => i.status === 'Resolved').length;
+      
+      const updatedProject = {
+        ...project,
+        drawings: project.drawings.filter(d => d.id !== drawingId),
+        issueCount: project.issueCount - drawingIssues.length,
+        resolvedCount: project.resolvedCount - resolvedIssues,
+      };
+      onUpdateProject(updatedProject);
+      
+      setIssues(prev => prev.filter(i => i.drawingId !== drawingId));
+      
+      if (selectedDrawing?.id === drawingId) {
+        setSelectedDrawing(updatedProject.drawings.length > 0 ? updatedProject.drawings[0] : null);
+      }
+    } catch (error) {
+      console.error('Failed to delete drawing:', error);
+      alert('Failed to delete drawing. Please try again.');
     }
   }, [project, issues, selectedDrawing, onUpdateProject]);
 

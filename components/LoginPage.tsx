@@ -2,37 +2,45 @@ import { useState } from 'react';
 import { AlertCircle, ArrowLeft, Mail, Lock } from 'lucide-react';
 
 interface LoginPageProps {
-  onLogin: (email: string, password: string) => void;
+  onLogin: (email: string, password: string, name?: string, role?: 'junior' | 'senior') => void;
   onBack: () => void;
 }
 
 export function LoginPage({ onLogin, onBack }: LoginPageProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [role, setRole] = useState<'junior' | 'senior'>('junior');
   const [isLoading, setIsLoading] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     
-    // Simulate API call
-    setTimeout(() => {
-      onLogin(email, password);
+    try {
+      if (isSignUp) {
+        await onLogin(email, password, name, role);
+      } else {
+        await onLogin(email, password);
+      }
+    } catch (error: any) {
+      alert(error.message || 'Authentication failed');
+    } finally {
       setIsLoading(false);
-    }, 800);
+    }
   };
 
-  const quickLogin = (role: 'junior' | 'senior') => {
-    const email = role === 'senior' ? 'senior@engineering.com' : 'junior@engineering.com';
-    setEmail(email);
+  const quickLogin = (demoRole: 'junior' | 'senior') => {
+    const demoEmail = demoRole === 'senior' ? 'demo-senior@engineering.com' : 'demo-junior@engineering.com';
+    setEmail(demoEmail);
     setPassword('demo');
-    setTimeout(() => {
-      onLogin(email, 'demo');
-    }, 100);
+    // Immediately login with demo account
+    onLogin(demoEmail, 'demo');
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center p-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center p-6 overflow-y-auto">
       <div className="w-full max-w-md">
         {/* Back Button */}
         <button
@@ -53,12 +61,48 @@ export function LoginPage({ onLogin, onBack }: LoginPageProps) {
               </div>
               <span className="text-white text-2xl">DrawingReview AI</span>
             </div>
-            <h2 className="text-2xl text-white mb-2">Welcome Back</h2>
-            <p className="text-slate-400">Sign in to continue to your workspace</p>
+            <h2 className="text-2xl text-white mb-2">
+              {isSignUp ? 'Create Account' : 'Welcome Back'}
+            </h2>
+            <p className="text-slate-400">
+              {isSignUp ? 'Sign up to get started' : 'Sign in to continue to your workspace'}
+            </p>
           </div>
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
+            {isSignUp && (
+              <>
+                <div>
+                  <label className="block text-sm text-slate-300 mb-2">
+                    Full Name
+                  </label>
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-900/50 border border-white/10 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="John Doe"
+                    required={isSignUp}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-300 mb-2">
+                    Role
+                  </label>
+                  <select
+                    value={role}
+                    onChange={(e) => setRole(e.target.value as 'junior' | 'senior')}
+                    className="w-full px-4 py-3 bg-slate-900/50 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    required={isSignUp}
+                  >
+                    <option value="junior">Junior Engineer</option>
+                    <option value="senior">Senior Engineer</option>
+                  </select>
+                </div>
+              </>
+            )}
+
             <div>
               <label className="block text-sm text-slate-300 mb-2">
                 Email Address
@@ -89,6 +133,7 @@ export function LoginPage({ onLogin, onBack }: LoginPageProps) {
                   className="w-full pl-11 pr-4 py-3 bg-slate-900/50 border border-white/10 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="••••••••"
                   required
+                  minLength={6}
                 />
               </div>
             </div>
@@ -98,9 +143,25 @@ export function LoginPage({ onLogin, onBack }: LoginPageProps) {
               disabled={isLoading}
               className="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isLoading ? 'Signing in...' : 'Sign In'}
+              {isLoading 
+                ? (isSignUp ? 'Creating account...' : 'Signing in...') 
+                : (isSignUp ? 'Sign Up' : 'Sign In')
+              }
             </button>
           </form>
+
+          <div className="mt-4 text-center">
+            <button
+              type="button"
+              onClick={() => setIsSignUp(!isSignUp)}
+              className="text-sm text-blue-400 hover:text-blue-300"
+            >
+              {isSignUp 
+                ? 'Already have an account? Sign in' 
+                : "Don't have an account? Sign up"
+              }
+            </button>
+          </div>
 
           {/* Demo Accounts */}
           <div className="mt-8 pt-6 border-t border-white/10">
